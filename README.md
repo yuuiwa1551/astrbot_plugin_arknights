@@ -6,6 +6,8 @@
 
 ### *罗德岛终端 · 明日方舟 AstrBot 插件*
 
+> 这是 [yuuiwa1551 的个人维护分支](https://github.com/yuuiwa1551/astrbot_plugin_arknights)，在 [Coe / Siq5005 的原项目](https://github.com/Siq5005/astrbot_plugin_arknights)基础上加入终末地签到。安装与更新请使用本仓库；原项目作者与 MIT 许可保持保留。
+
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-FFB400?style=for-the-badge&logo=python)](https://github.com/AstrBotDevs/AstrBot)
 [![Version](https://img.shields.io/badge/version-0.4.7-FFB400?style=for-the-badge)](#-更新日志)
 [![License](https://img.shields.io/badge/license-MIT-FFB400?style=for-the-badge)](LICENSE)
@@ -70,11 +72,11 @@
 
 ### 快速安装
 
-在 AstrBot 插件管理器中搜索 `astrbot_plugin_arknights` 安装，或通过 Git 克隆：
+在 AstrBot 插件管理器中通过仓库链接 `https://github.com/yuuiwa1551/astrbot_plugin_arknights` 安装本维护分支，或通过 Git 克隆：
 
 ```bash
 cd AstrBot/data/plugins
-git clone https://github.com/Siq5005/astrbot_plugin_arknights.git
+git clone https://github.com/yuuiwa1551/astrbot_plugin_arknights.git
 ```
 
 ### 环境依赖

@@ -17,7 +17,7 @@ desc: |-
 short_desc: 明日方舟数据查询、抽卡分析与双游戏签到
 version: "0.4.7"
 author: Coe
-repo: https://github.com/Siq5005/astrbot_plugin_arknights
+repo: https://github.com/yuuiwa1551/astrbot_plugin_arknights
 astrbot_version: ">=4.16,<5"
 support_platforms:
   - aiocqhttp
