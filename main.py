@@ -59,7 +59,7 @@ from .core.skland import (
 from .core.store import Store
 
 PLUGIN_NAME = "astrbot_plugin_arknights"
-PLUGIN_VERSION = "0.4.7"
+PLUGIN_VERSION = "0.4.8"
 
 # How often the health watchdog probes the self-hosted service, and how many
 # consecutive bad observations it takes to raise an alert. The service writes
@@ -136,7 +136,7 @@ ark抽卡分析 同步     强制重新同步官网记录（也可写 ark抽卡�
 ark抽卡重置          清空本机保存的抽卡记录
 
 【签到与提醒】
-ark签到              手动执行明日方舟签到
+ark签到              同时签到明日方舟与终末地，分别显示结果
 ark终末地签到        使用同一登录，为终末地各服务器角色签到
 ark订阅理智 / ark取消订阅理智  理智回满推送
 ark订阅签到 / ark取消订阅签到  群内签到结果通知
@@ -194,7 +194,7 @@ HELP_SECTIONS = [
     {
         "title": "签到与提醒",
         "items": [
-            {"cmd": "ark签到", "desc": "手动执行明日方舟签到"},
+            {"cmd": "ark签到", "desc": "同时签到明日方舟与终末地，分别显示结果"},
             {"cmd": "ark终末地签到", "desc": "复用现有登录，为终末地各服务器角色签到"},
             {"cmd": "ark订阅理智 / ark取消订阅理智", "desc": "理智回满推送到当前会话"},
             {"cmd": "ark订阅签到 / ark取消订阅签到", "desc": "群内签到结果通知"},
@@ -979,7 +979,7 @@ class ArknightsPlugin(Star):
             return f"{name}：签到成功（{awards}）"
         if "已签到" in result.error or "重复" in result.error:
             return f"{name}：今天已签到"
-        return f"{name}：{result.error}"
+        return f"{name}：签到失败（{result.error}）"
 
     async def _endfield_sign_results(
         self, cred: Credential
@@ -1029,28 +1029,70 @@ class ArknightsPlugin(Star):
 
     @filter.command("ark签到")
     async def do_sign(self, event: AstrMessageEvent):
-        """Run the Skland attendance sign-in for the current role."""
-        resolved = await self._resolve_binding(event)
-        if not resolved:
-            yield event.plain_result(NO_BINDING_TEXT)
+        """Sign the current Arknights role and all Endfield roles independently."""
+        user = await self.store.get_user(event.get_sender_id())
+        if not user:
+            yield event.plain_result("你还没有绑定账号。发送 `ark绑定` 扫码登录即可。")
             return
-        user, binding = resolved
         try:
             authorization = await self.skland.get_authorization(
                 str(user.get("token") or "")
             )
             cred = await self.skland.get_credential(authorization)
-            result = await self.skland.sign_arknights(cred, self._to_binding(binding))
         except SklandError as exc:
-            yield event.plain_result(await self._report_query_error(event, exc))
+            error = await self._report_query_error(event, exc)
+            yield event.plain_result(f"两款游戏均未签到：{error}")
             return
-        if result.success:
-            awards = "、".join(result.awards) if result.awards else "无"
-            yield event.plain_result(f"签到成功，获得：{awards}")
-        elif "已签到" in result.error or "重复" in result.error:
-            yield event.plain_result("今天已经签到过了，无需重复签到。")
+
+        results: list[tuple[dict[str, Any], SignInResult]] = []
+        bindings = user.get("bindings") or []
+        primary = str(user.get("primary_uid") or "")
+        binding = next(
+            (entry for entry in bindings if str(entry.get("uid")) == primary),
+            bindings[0] if bindings else None,
+        )
+        if binding:
+            try:
+                result = await self.skland.sign_arknights(
+                    cred, self._to_binding(binding)
+                )
+            except SklandError as exc:
+                result = SignInResult(success=False, error=str(exc))
+            results.append(({**binding, "game_name": "明日方舟"}, result))
         else:
-            yield event.plain_result(f"签到失败：{result.error}")
+            results.append(
+                (
+                    {"game_name": "明日方舟", "nick_name": "账号"},
+                    SignInResult(success=False, error="未绑定明日方舟角色"),
+                )
+            )
+
+        # Manual sign-in always covers both games, even when Endfield's daily
+        # automatic job is disabled. Each game keeps its own failure result.
+        try:
+            endfield = await self._endfield_sign_results(cred)
+        except SklandError as exc:
+            endfield = [
+                (
+                    {"game_name": "终末地", "nick_name": "角色同步"},
+                    SignInResult(success=False, error=str(exc)),
+                )
+            ]
+        if not endfield:
+            endfield = [
+                (
+                    {"game_name": "终末地", "nick_name": "账号"},
+                    SignInResult(
+                        success=False,
+                        error="未找到可用的终末地角色，请在森空岛绑定并同步角色",
+                    ),
+                )
+            ]
+        results.extend(endfield)
+        yield event.plain_result(
+            "森空岛签到结果\n"
+            + "\n".join(self._sign_line(entry, result) for entry, result in results)
+        )
 
     @filter.command("ark订阅理智")
     async def subscribe_sanity(self, event: AstrMessageEvent):

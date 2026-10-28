@@ -1284,6 +1284,8 @@ async def main() -> int:
     await plugin.store.remove_user("10001")
     results = await drive(plugin.do_endfield_sign(StubEvent("/ark终末地签到")))
     check("未绑定时终末地签到提示扫码", results and "ark绑定" in results[0][1])
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    check("未绑定时双游戏签到提示扫码", results and "ark绑定" in results[0][1])
     results = await drive(plugin.show_note(StubEvent("/ark便签")))
     check(
         "ark便签 without binding prompts to bind",
@@ -1401,6 +1403,73 @@ async def main() -> int:
 
     results = await drive(plugin.do_sign(StubEvent("/ark签到")))
     check("ark签到 reports the awards", results and "合成玉x500" in results[0][1])
+    text = results[0][1] if results else ""
+    check(
+        "ark签到默认同时签两款并说明单个角色失败",
+        "【明日方舟】" in text
+        and "【终末地】" in text
+        and "嵌晶玉x100" in text
+        and "签到失败（该角色网络异常）" in text,
+        text,
+    )
+
+    async def fail_ark_sign(cred, binding):
+        raise plugin_module.SklandError("方舟接口暂时不可用")
+
+    plugin.skland.sign_arknights = fail_ark_sign
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    text = results[0][1] if results else ""
+    check(
+        "方舟签到抛出异常后仍签到终末地",
+        "签到失败（方舟接口暂时不可用）" in text and "嵌晶玉x100" in text,
+        text,
+    )
+    plugin.skland.sign_arknights = fake_sign
+
+    async def fail_endfield_sync(cred):
+        raise plugin_module.SklandError("终末地角色接口暂时不可用")
+
+    plugin.skland.get_endfield_roles = fail_endfield_sync
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    text = results[0][1] if results else ""
+    check(
+        "终末地角色同步失败时保留方舟签到结果",
+        "合成玉x500" in text and "签到失败（终末地角色接口暂时不可用）" in text,
+        text,
+    )
+    plugin.skland.get_endfield_roles = fake_endfield_roles
+
+    async def already_signed_ark(cred, binding):
+        return SignInResult(success=False, error="今日已签到")
+
+    plugin.skland.sign_arknights = already_signed_ark
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    text = results[0][1] if results else ""
+    check(
+        "方舟已签到时继续签终末地并分别说明",
+        "今天已签到" in text and "嵌晶玉x100" in text,
+        text,
+    )
+    plugin.skland.sign_arknights = fake_sign
+
+    plugin.config["endfield_auto_sign_enabled"] = False
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    check(
+        "关闭终末地自动签到不影响双游戏手动签到",
+        results and "嵌晶玉x100" in results[0][1],
+    )
+    plugin.config.pop("endfield_auto_sign_enabled")
+
+    async def fail_shared_login(token):
+        raise plugin_module.SklandError("请求超时")
+
+    plugin.skland.get_authorization = fail_shared_login
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    check(
+        "共享登录失败时明确两款均未执行",
+        results and "两款游戏均未签到" in results[0][1] and "请求超时" in results[0][1],
+    )
+    plugin.skland.get_authorization = fake_authorization
 
     results = await drive(plugin.do_endfield_sign(StubEvent("/ark终末地签到")))
     text = results[0][1] if results else ""
@@ -1444,6 +1513,15 @@ async def main() -> int:
         "仅终末地账号也能完成扫码绑定",
         "绑定成功" in binding_message and terminal_user["bindings"] == [],
     )
+    terminal_sign_event = StubEvent("/ark签到")
+    terminal_sign_event.get_sender_id = lambda: "endfield-only"
+    results = await drive(plugin.do_sign(terminal_sign_event))
+    text = results[0][1] if results else ""
+    check(
+        "只有终末地角色时双游戏签到仍处理终末地",
+        "未绑定明日方舟角色" in text and "嵌晶玉x100" in text,
+        text,
+    )
     # Test the caller's unbinding without touching the earlier fixture account.
     terminal_event = StubEvent("/ark解绑")
     terminal_event.get_sender_id = lambda: "endfield-only"
@@ -1459,6 +1537,13 @@ async def main() -> int:
     check(
         "没有终末地角色时不错误提示重新登录",
         results and "未找到可用的终末地角色" in results[0][1],
+    )
+    results = await drive(plugin.do_sign(StubEvent("/ark签到")))
+    text = results[0][1] if results else ""
+    check(
+        "只有方舟角色时保留方舟成功并说明终末地未绑定",
+        "合成玉x500" in text and "未找到可用的终末地角色" in text,
+        text,
     )
     plugin.skland.get_endfield_roles = fake_endfield_roles
 

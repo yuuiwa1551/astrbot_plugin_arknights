@@ -9,7 +9,7 @@
 > 这是 [yuuiwa1551 的个人维护分支](https://github.com/yuuiwa1551/astrbot_plugin_arknights)，在 [Coe / Siq5005 的原项目](https://github.com/Siq5005/astrbot_plugin_arknights)基础上加入终末地签到。安装与更新请使用本仓库；原项目作者与 MIT 许可保持保留。
 
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-FFB400?style=for-the-badge&logo=python)](https://github.com/AstrBotDevs/AstrBot)
-[![Version](https://img.shields.io/badge/version-0.4.7-FFB400?style=for-the-badge)](#-更新日志)
+[![Version](https://img.shields.io/badge/version-0.4.8-FFB400?style=for-the-badge)](#-更新日志)
 [![License](https://img.shields.io/badge/license-MIT-FFB400?style=for-the-badge)](LICENSE)
 
 ### 🚀 基于森空岛官方接口的明日方舟查询工具
@@ -184,10 +184,12 @@ astrbot_plugin_arknights/
 | `ark抽卡记录` | 最近的抽卡记录列表 | 全部 |
 | `ark抽卡分析 同步`（或 `ark抽卡同步`） | 忽略缓存，强制重新同步官网记录 | 全部 |
 | `ark抽卡重置` | 清空该角色在本机保存的抽卡记录 | 全部 |
-| `ark签到` | 手动执行明日方舟签到 | 全部 |
+| `ark签到` | 同时签到当前明日方舟角色与终末地各服务器角色，分别显示结果 | 全部 |
 | `ark终末地签到` | 复用现有登录，为终末地所有已绑定服务器角色签到 | 全部 |
 | `ark订阅理智` / `ark取消订阅理智` | 理智回满时推送到**当前会话**；群聊里会 **@订阅者** 并写明是哪个角色 | 全部 |
 | `ark订阅签到` / `ark取消订阅签到` | 群内自动签到结果通知 | 群聊 |
+
+`ark签到` 默认同时签到两款游戏，分别报告成功、今天已签到或失败原因。某款游戏失败或没有绑定角色时，另一款游戏继续签到；关闭终末地自动签到不影响这条手动指令。`ark终末地签到` 继续保留为仅签到终末地的入口。
 
 终末地签到直接使用已绑定的鹰角账号，已有用户无需重新扫码。每次签到都会从森空岛同步终末地角色，按角色与服务器分别签到；结果会标注游戏、角色与服务器。默认每日 `sign_time` 同时为两款游戏签到，通知继续使用现有私聊或群订阅。单个角色失败不会中断其他角色。
 
@@ -369,6 +371,12 @@ astrbot_plugin_arknights/
 
 <details>
 <summary>点击展开版本历史</summary>
+
+### 0.4.8 (2026-10-29)
+
+- `ark签到` 默认同时签到明日方舟与终末地，保留方舟主角色选择，分别显示奖励、已签到状态或失败原因。
+- 其中一款游戏签到失败或未绑定角色时继续处理另一款；终末地自动签到开关不限制手动签到。
+- 更新文字与图片帮助，并补充跨游戏失败隔离和仅绑定单款游戏的检查。
 
 ### 0.4.7 (2026-10-29)
 
