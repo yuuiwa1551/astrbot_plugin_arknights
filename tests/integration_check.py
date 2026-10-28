@@ -57,7 +57,7 @@ import data.plugins.astrbot_plugin_arknights.main as plugin_module  # noqa: E402
 from astrbot.core.star.star_handler import star_handlers_registry  # noqa: E402
 
 from core.render import Renderer  # noqa: E402
-from core.skland import SignInResult  # noqa: E402
+from core.skland import EndfieldRole, SignInResult  # noqa: E402
 from core.store import Store  # noqa: E402
 
 # Importing the plugin initialises AstrBot's logging, which installs a file sink
@@ -132,6 +132,8 @@ EXPECTED_COMMANDS = {
     "ark便签",
     "ark理智",
     "ark签到",
+    "ark终末地签到",
+    "ark解绑",
     "ark订阅理智",
     "ark取消订阅理智",
     "ark订阅签到",
@@ -1264,8 +1266,24 @@ async def main() -> int:
     plugin.skland.get_player_info = fake_player_info
     plugin.skland.sign_arknights = fake_sign
 
+    async def fake_endfield_roles(cred):
+        return [
+            EndfieldRole("ef1", "srv1", "管理员", "一服"),
+            EndfieldRole("ef2", "srv2", "管理员", "二服"),
+        ]
+
+    async def fake_endfield_sign(cred, role):
+        if role.server_id == "srv2":
+            raise plugin_module.SklandError("该角色网络异常")
+        return SignInResult(success=True, nickname=role.nickname, awards=["嵌晶玉x100"])
+
+    plugin.skland.get_endfield_roles = fake_endfield_roles
+    plugin.skland.sign_endfield = fake_endfield_sign
+
     # Unbound user
     await plugin.store.remove_user("10001")
+    results = await drive(plugin.do_endfield_sign(StubEvent("/ark终末地签到")))
+    check("未绑定时终末地签到提示扫码", results and "ark绑定" in results[0][1])
     results = await drive(plugin.show_note(StubEvent("/ark便签")))
     check(
         "ark便签 without binding prompts to bind",
@@ -1383,6 +1401,66 @@ async def main() -> int:
 
     results = await drive(plugin.do_sign(StubEvent("/ark签到")))
     check("ark签到 reports the awards", results and "合成玉x500" in results[0][1])
+
+    results = await drive(plugin.do_endfield_sign(StubEvent("/ark终末地签到")))
+    text = results[0][1] if results else ""
+    check(
+        "终末地手动签到复用原登录并展示奖励",
+        "嵌晶玉x100" in text and "一服" in text,
+        text,
+    )
+    check(
+        "终末地单个服务器失败不影响其他角色",
+        "二服" in text and "网络异常" in text,
+        text,
+    )
+    user = await plugin.store.get_user("10001")
+    combined = await plugin._sign_in_user("10001", user)
+    check(
+        "自动签到同时覆盖方舟和终末地",
+        len(combined) == 3
+        and combined[0][1].success
+        and combined[1][1].success
+        and not combined[2][1].success,
+    )
+    plugin.config["endfield_auto_sign_enabled"] = False
+    ark_only = await plugin._sign_in_user("10001", user)
+    check(
+        "关闭终末地自动签到仍保留方舟",
+        len(ark_only) == 1 and ark_only[0][0]["game_name"] == "明日方舟",
+    )
+    plugin.config.pop("endfield_auto_sign_enabled")
+
+    async def no_ark_roles(cred):
+        return []
+
+    async def no_endfield_roles(cred):
+        return []
+
+    plugin.skland.get_binding_list = no_ark_roles
+    binding_message = await plugin._complete_binding("endfield-only", "only-token")
+    terminal_user = await plugin.store.get_user("endfield-only")
+    check(
+        "仅终末地账号也能完成扫码绑定",
+        "绑定成功" in binding_message and terminal_user["bindings"] == [],
+    )
+    # Test the caller's unbinding without touching the earlier fixture account.
+    terminal_event = StubEvent("/ark解绑")
+    terminal_event.get_sender_id = lambda: "endfield-only"
+    results = await drive(plugin.unbind_account(terminal_event))
+    check(
+        "终末地专用登录可彻底解绑",
+        results
+        and "已解绑" in results[0][1]
+        and await plugin.store.get_user("endfield-only") is None,
+    )
+    plugin.skland.get_endfield_roles = no_endfield_roles
+    results = await drive(plugin.do_endfield_sign(StubEvent("/ark终末地签到")))
+    check(
+        "没有终末地角色时不错误提示重新登录",
+        results and "未找到可用的终末地角色" in results[0][1],
+    )
+    plugin.skland.get_endfield_roles = fake_endfield_roles
 
     results = await drive(plugin.list_bindings(StubEvent("/ark绑定列表")))
     check(

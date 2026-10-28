@@ -14,7 +14,13 @@
     "description": "每日自动签到时间",
     "type": "string",
     "default": "00:05",
-    "hint": "格式 HH:MM"
+    "hint": "格式 HH:MM，明日方舟与终末地共用此签到时间"
+  },
+  "endfield_auto_sign_enabled": {
+    "description": "同时自动签到终末地",
+    "type": "bool",
+    "default": true,
+    "hint": "复用已绑定的鹰角账号，每天自动同步终末地各服务器角色后签到；关闭不影响手动签到"
   },
   "sanity_poll_interval": {
     "description": "理智订阅轮询间隔(分钟)",

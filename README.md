@@ -7,7 +7,7 @@
 ### *罗德岛终端 · 明日方舟 AstrBot 插件*
 
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-FFB400?style=for-the-badge&logo=python)](https://github.com/AstrBotDevs/AstrBot)
-[![Version](https://img.shields.io/badge/version-0.4.6-FFB400?style=for-the-badge)](#-更新日志)
+[![Version](https://img.shields.io/badge/version-0.4.7-FFB400?style=for-the-badge)](#-更新日志)
 [![License](https://img.shields.io/badge/license-MIT-FFB400?style=for-the-badge)](LICENSE)
 
 ### 🚀 基于森空岛官方接口的明日方舟查询工具
@@ -50,7 +50,7 @@
 
 ✅ **抽卡分析** - 官方抽卡记录导入、**每个卡池独立统计**（含 UP 干员与开放时间）、六星序列与保底、UP / 歪判定、欧非评级
 
-✅ **自动签到** - 每日定时森空岛签到，支持随机延迟防风控
+✅ **自动签到** - 每日定时森空岛签到，复用同一鹰角账号同时签到明日方舟与终末地，支持随机延迟防风控
 
 ✅ **订阅提醒** - 理智回满推送、群内签到结果通知、官方新公告推送
 
@@ -94,6 +94,7 @@ playwright install chromium
 | `render_timeout` | int | `30000` | 图片渲染超时时间（毫秒） |
 | `data_ttl` | int | `300` | 玩家数据缓存时间（秒），同一账号在该时间内复用缓存，避免频繁请求触发风控 |
 | `sign_time` | string | `00:05` | 每日自动签到时间，格式 `HH:MM` |
+| `endfield_auto_sign_enabled` | bool | `true` | 同时自动签到终末地；关闭后仍可手动签到 |
 | `sanity_poll_interval` | int | `20` | 理智订阅轮询间隔（分钟），下限 10 分钟 |
 | `announce_poll_interval` | int | `30` | 公告订阅轮询间隔（分钟），下限 15 分钟 |
 | `announce_push_cards` | int | `3` | 公告推送附带详情卡的数量；前 N 条渲染为卡片（含配图），其余只给标题，`0` 表示全部只发文字 |
@@ -147,6 +148,7 @@ astrbot_plugin_arknights/
 | `ark绑定列表` | 查看所有绑定角色 | 全部 |
 | `ark切换绑定 <序号>` | 切换主账号 | 全部 |
 | `ark删除绑定 <序号>` | 解绑指定角色 | 全部 |
+| `ark解绑` | 解绑整个鹰角账号，停止两款游戏自动签到 | 全部 |
 
 > 💬 **群聊 / 私聊均可使用**：所有指令在群聊与私聊中都能用。群聊里发送 `ark绑定` 时，二维码消息会**额外附上凭证警告**——二维码等同于登录凭证，谁先扫码，TA 的森空岛账号就会绑定到发起指令的那个人名下。订阅类指令推送的目标就是**你发起指令的那个会话**。
 
@@ -180,9 +182,14 @@ astrbot_plugin_arknights/
 | `ark抽卡记录` | 最近的抽卡记录列表 | 全部 |
 | `ark抽卡分析 同步`（或 `ark抽卡同步`） | 忽略缓存，强制重新同步官网记录 | 全部 |
 | `ark抽卡重置` | 清空该角色在本机保存的抽卡记录 | 全部 |
-| `ark签到` | 手动执行森空岛签到 | 全部 |
+| `ark签到` | 手动执行明日方舟签到 | 全部 |
+| `ark终末地签到` | 复用现有登录，为终末地所有已绑定服务器角色签到 | 全部 |
 | `ark订阅理智` / `ark取消订阅理智` | 理智回满时推送到**当前会话**；群聊里会 **@订阅者** 并写明是哪个角色 | 全部 |
 | `ark订阅签到` / `ark取消订阅签到` | 群内自动签到结果通知 | 群聊 |
+
+终末地签到直接使用已绑定的鹰角账号，已有用户无需重新扫码。每次签到都会从森空岛同步终末地角色，按角色与服务器分别签到；结果会标注游戏、角色与服务器。默认每日 `sign_time` 同时为两款游戏签到，通知继续使用现有私聊或群订阅。单个角色失败不会中断其他角色。
+
+只玩终末地的账号也可通过 `ark绑定` 登录，用 `ark绑定列表` 查看登录状态、`ark解绑` 删除整个登录。明日方舟的数据查询仍需绑定对应的方舟角色。`ark删除绑定` 删除最后一个方舟角色时沿用原行为，移除整个登录；如需继续签到终末地，请重新扫码绑定。
 
 ### 📢 官方公告
 
@@ -361,6 +368,13 @@ astrbot_plugin_arknights/
 <details>
 <summary>点击展开版本历史</summary>
 
+### 0.4.7 (2026-10-29)
+
+- 新增 `ark终末地签到`，复用现有鹰角登录，支持多服务器角色、奖励展示和重复签到提示。
+- 每日自动签到默认同时覆盖终末地，可通过 `endfield_auto_sign_enabled` 单独关闭。
+- 支持仅有终末地角色的账号扫码绑定，新增 `ark解绑`；已有方舟账号及主角色选择保持兼容。
+- 更新文字与图片帮助，并补充角色解析、签名请求和双游戏签到回归检查。
+
 ### 0.4.6 (2026-10-19)
 
 - ✨ **超长公告不再刷屏**：配图很多、整卡渲染不出来的公告（如「〓朝陇山 余量上架〓」9 张长图），现在只把**首图**放进卡片并注明总数与查看方式，一次推送从 7 条消息回到 1 条；整卡连首图都放不下时才退回转发原图
@@ -500,6 +514,8 @@ astrbot_plugin_arknights/
 
 - [astrbot_plugin_skland](https://github.com/Azincc/astrbot_plugin_skland) —— 森空岛设备指纹与请求签名算法的参考实现
 - [AstrBot-SenKongDao-Check-in](https://github.com/Twilight719/AstrBot-SenKongDao-Check-in) —— 理智回满外推公式与订阅推送思路
+
+终末地签到接口参考 [astrbot_plugin_sklandv2](https://github.com/qihang518887/astrbot_plugin_sklandv2) 的公开协议实现，并结合森空岛当前绑定接口核对角色字段；本插件在现有签名客户端中独立实现，不复制其完整客户端。
 
 ### 产品形态参考
 

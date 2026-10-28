@@ -49,11 +49,17 @@ from .core.operators import (
     group_operators,
 )
 from .core.render import Renderer
-from .core.skland import SignInResult, SklandClient, SklandError, UserBinding
+from .core.skland import (
+    Credential,
+    SignInResult,
+    SklandClient,
+    SklandError,
+    UserBinding,
+)
 from .core.store import Store
 
 PLUGIN_NAME = "astrbot_plugin_arknights"
-PLUGIN_VERSION = "0.4.6"
+PLUGIN_VERSION = "0.4.7"
 
 # How often the health watchdog probes the self-hosted service, and how many
 # consecutive bad observations it takes to raise an alert. The service writes
@@ -81,7 +87,7 @@ GROUP_QR_WARNING = (
     "谁先扫码，TA 的森空岛账号就会绑定到发起指令的这个人名下。"
 )
 
-NO_BINDING_TEXT = "你还没有绑定账号。发送 `ark绑定` 扫码登录即可。"
+NO_BINDING_TEXT = "你还没有绑定明日方舟角色。发送 `ark绑定` 扫码登录即可。"
 
 # Substrings that indicate the stored passport token is no longer usable.
 AUTH_ERROR_MARKERS = ("未登录", "失效", "过期", "unauthorized", "401", "403")
@@ -104,6 +110,7 @@ ark绑定              使用森空岛 APP 扫码登录（唯一登录方式）
 ark绑定列表          查看所有绑定账号
 ark切换绑定 <序号>    切换主账号
 ark删除绑定 <序号>    解绑指定账号
+ark解绑              解绑整个鹰角账号（含终末地签到）
 
 【数据查询】
 ark便签              账号总览
@@ -129,7 +136,8 @@ ark抽卡分析 同步     强制重新同步官网记录（也可写 ark抽卡�
 ark抽卡重置          清空本机保存的抽卡记录
 
 【签到与提醒】
-ark签到              手动执行森空岛签到
+ark签到              手动执行明日方舟签到
+ark终末地签到        使用同一登录，为终末地各服务器角色签到
 ark订阅理智 / ark取消订阅理智  理智回满推送
 ark订阅签到 / ark取消订阅签到  群内签到结果通知
 
@@ -145,6 +153,7 @@ HELP_SECTIONS = [
             {"cmd": "ark绑定列表", "desc": "查看所有绑定账号"},
             {"cmd": "ark切换绑定 <序号>", "desc": "切换主账号"},
             {"cmd": "ark删除绑定 <序号>", "desc": "解绑指定账号"},
+            {"cmd": "ark解绑", "desc": "解绑整个鹰角账号（含终末地签到）"},
         ],
     },
     {
@@ -185,7 +194,8 @@ HELP_SECTIONS = [
     {
         "title": "签到与提醒",
         "items": [
-            {"cmd": "ark签到", "desc": "手动执行森空岛签到"},
+            {"cmd": "ark签到", "desc": "手动执行明日方舟签到"},
+            {"cmd": "ark终末地签到", "desc": "复用现有登录，为终末地各服务器角色签到"},
             {"cmd": "ark订阅理智 / ark取消订阅理智", "desc": "理智回满推送到当前会话"},
             {"cmd": "ark订阅签到 / ark取消订阅签到", "desc": "群内签到结果通知"},
         ],
@@ -530,8 +540,14 @@ class ArknightsPlugin(Star):
             bindings = await self.skland.get_binding_list(cred)
         except SklandError as exc:
             return f"绑定失败：{exc}"
+        endfield_roles = []
         if not bindings:
-            return "该账号下没有找到明日方舟角色，请确认已在森空岛绑定角色后重试。"
+            try:
+                endfield_roles = await self.skland.get_endfield_roles(cred)
+            except SklandError as exc:
+                return f"绑定失败：{exc}"
+            if not endfield_roles:
+                return "该账号下没有找到明日方舟或终末地角色，请确认已在森空岛绑定角色后重试。"
 
         limit = int(self.config.get("max_bindings", 5) or 0)
         truncated = False
@@ -542,11 +558,13 @@ class ArknightsPlugin(Star):
         await self.store.upsert_auth(
             user_key,
             token,
-            bindings[0].nickname,
+            bindings[0].nickname if bindings else endfield_roles[0].nickname,
             [binding.to_dict() for binding in bindings],
             umo=umo,
         )
         suffix = f"（仅保留前 {limit} 个）" if truncated else ""
+        if not bindings:
+            return f"绑定成功，找到 {len(endfield_roles)} 个终末地角色。发送 `ark终末地签到` 即可签到。"
         return f"绑定成功，共 {len(bindings)} 个明日方舟角色{suffix}。"
 
     # ── account commands ──────────────────────────────────────────────────
@@ -707,8 +725,14 @@ class ArknightsPlugin(Star):
     async def list_bindings(self, event: AstrMessageEvent):
         """List every account bound by the caller."""
         user = await self.store.get_user(event.get_sender_id())
-        if not user or not user.get("bindings"):
+        if not user:
             yield event.plain_result(NO_BINDING_TEXT)
+            return
+        if not user.get("bindings"):
+            yield event.plain_result(
+                "鹰角账号已绑定，未找到明日方舟角色。\n"
+                "使用 `ark终末地签到` 为终末地角色签到，或 `ark解绑` 移除整个账号。"
+            )
             return
         primary = str(user.get("primary_uid") or "")
         lines = [f"共 {len(user['bindings'])} 个绑定角色："]
@@ -720,7 +744,19 @@ class ArknightsPlugin(Star):
                 f"{binding.get('channel_name') or '未知服'} · uid ...{uid[-4:]}{mark}"
             )
         lines.append("使用 `ark切换绑定 <序号>` 或 `ark删除绑定 <序号>` 管理。")
+        lines.append("终末地角色使用同一登录，发送 `ark终末地签到` 时自动同步。")
         yield event.plain_result("\n".join(lines))
+
+    @filter.command("ark解绑")
+    async def unbind_account(self, event: AstrMessageEvent):
+        """Remove the caller's passport login and per-user subscriptions."""
+        removed = await self.store.remove_user(event.get_sender_id())
+        self._sanity_notified.pop(event.get_sender_id(), None)
+        yield event.plain_result(
+            "已解绑鹰角账号，停止该账号的明日方舟和终末地自动签到。"
+            if removed
+            else "你还没有绑定账号。"
+        )
 
     @filter.command("ark切换绑定")
     async def switch_binding(self, event: AstrMessageEvent):
@@ -932,10 +968,64 @@ class ArknightsPlugin(Star):
             One line of notification text.
         """
         name = str(binding.get("nick_name") or "未知角色")
+        game = str(binding.get("game_name") or "")
+        if game:
+            name = f"【{game}】{name}"
+        server = str(binding.get("server_name") or "")
+        if server:
+            name = f"{name}（{server}）"
         if result.success:
             awards = "、".join(result.awards) if result.awards else "无"
             return f"{name}：签到成功（{awards}）"
+        if "已签到" in result.error or "重复" in result.error:
+            return f"{name}：今天已签到"
         return f"{name}：{result.error}"
+
+    async def _endfield_sign_results(
+        self, cred: Credential
+    ) -> list[tuple[dict[str, Any], SignInResult]]:
+        """Discover and sign each server role; isolate per-role failures."""
+        results: list[tuple[dict[str, Any], SignInResult]] = []
+        for role in await self.skland.get_endfield_roles(cred):
+            binding = {
+                "game_name": "终末地",
+                "nick_name": role.nickname,
+                "server_name": role.server_name,
+            }
+            try:
+                result = await self.skland.sign_endfield(cred, role)
+            except SklandError as exc:
+                result = SignInResult(
+                    success=False, nickname=role.nickname, error=str(exc)
+                )
+            results.append((binding, result))
+        return results
+
+    @filter.command("ark终末地签到")
+    async def do_endfield_sign(self, event: AstrMessageEvent):
+        """Sign all Endfield roles using the caller's existing passport login."""
+        user = await self.store.get_user(event.get_sender_id())
+        if not user:
+            yield event.plain_result("你还没有绑定账号。发送 `ark绑定` 扫码登录即可。")
+            return
+        try:
+            authorization = await self.skland.get_authorization(
+                str(user.get("token") or "")
+            )
+            cred = await self.skland.get_credential(authorization)
+            results = await self._endfield_sign_results(cred)
+        except SklandError as exc:
+            yield event.plain_result(await self._report_query_error(event, exc))
+            return
+        if not results:
+            yield event.plain_result(
+                "未找到可用的终末地角色，请先在森空岛绑定并同步角色后重试；无需重新登录机器人。"
+            )
+            return
+        yield event.plain_result(
+            "终末地签到结果\n"
+            + "\n".join(self._sign_line(binding, result) for binding, result in results)
+        )
 
     @filter.command("ark签到")
     async def do_sign(self, event: AstrMessageEvent):
@@ -1037,7 +1127,17 @@ class ArknightsPlugin(Star):
                     nickname=str(binding.get("nick_name") or ""),
                     error=str(exc),
                 )
-            results.append((binding, result))
+            results.append(({**binding, "game_name": "明日方舟"}, result))
+        if self.config.get("endfield_auto_sign_enabled", True):
+            try:
+                results.extend(await self._endfield_sign_results(cred))
+            except SklandError as exc:
+                results.append(
+                    (
+                        {"game_name": "终末地", "nick_name": "角色同步"},
+                        SignInResult(success=False, error=str(exc)),
+                    )
+                )
         return results
 
     async def _auto_sign_job(self) -> None:

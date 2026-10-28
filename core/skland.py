@@ -256,6 +256,16 @@ class UserBinding:
 
 
 @dataclass
+class EndfieldRole:
+    """An Endfield server role, distinct from the account binding uid."""
+
+    role_id: str
+    server_id: str
+    nickname: str = ""
+    server_name: str = ""
+
+
+@dataclass
 class SignInResult:
     """Outcome of a sign-in attempt."""
 
@@ -675,6 +685,16 @@ class SklandClient:
         payload = data["data"]
         return Credential(token=payload["token"], cred=payload["cred"])
 
+    async def _binding_apps(self, cred: Credential) -> list[dict[str, Any]]:
+        """Read the current game bindings with the shared Skland credential."""
+        did = await self.get_device_id()
+        url = f"{self.zonai_base}/api/v1/game/player/binding"
+        data = await self._request(
+            "GET", url, headers=self._signed_headers(url, "GET", None, cred, did)
+        )
+        self._check(data)
+        return (data.get("data") or {}).get("list") or []
+
     async def get_binding_list(self, cred: Credential) -> list[UserBinding]:
         """List the Arknights roles bound to a Skland account.
 
@@ -687,14 +707,8 @@ class SklandClient:
         Raises:
             SklandError: When the request is rejected.
         """
-        did = await self.get_device_id()
-        url = f"{self.zonai_base}/api/v1/game/player/binding"
-        data = await self._request(
-            "GET", url, headers=self._signed_headers(url, "GET", None, cred, did)
-        )
-        self._check(data)
         bindings: list[UserBinding] = []
-        for app in (data.get("data") or {}).get("list") or []:
+        for app in await self._binding_apps(cred):
             if app.get("appCode") != "arknights":
                 continue
             for item in app.get("bindingList") or []:
@@ -707,6 +721,42 @@ class SklandClient:
                     )
                 )
         return bindings
+
+    async def get_endfield_roles(self, cred: Credential) -> list[EndfieldRole]:
+        """Discover every Endfield role without mixing it into Arknights data.
+
+        Fetching roles on demand also enables existing logins without a storage
+        migration or another QR scan. Account uids and channelMasterId are not
+        substitutes for the roleId/serverId pair required by attendance.
+        """
+        roles: list[EndfieldRole] = []
+        seen: set[tuple[str, str]] = set()
+        for app in await self._binding_apps(cred):
+            if app.get("appCode") != "endfield":
+                continue
+            for binding in app.get("bindingList") or []:
+                for entry in binding.get("roles") or []:
+                    role_id = str(entry.get("roleId") or "")
+                    server_id = str(entry.get("serverId") or "")
+                    key = (role_id, server_id)
+                    if not role_id or not server_id or key in seen:
+                        continue
+                    seen.add(key)
+                    roles.append(
+                        EndfieldRole(
+                            role_id=role_id,
+                            server_id=server_id,
+                            nickname=str(
+                                entry.get("nickname") or binding.get("nickName") or ""
+                            ),
+                            server_name=str(
+                                entry.get("serverName")
+                                or binding.get("channelName")
+                                or ""
+                            ),
+                        )
+                    )
+        return roles
 
     async def get_player_info(self, cred: Credential, uid: str) -> dict[str, Any]:
         """Fetch the full in-game data snapshot for a role.
@@ -766,6 +816,43 @@ class SklandClient:
             for award in (data.get("data") or {}).get("awards") or []
         ]
         return SignInResult(success=True, nickname=binding.nickname, awards=awards)
+
+    async def sign_endfield(self, cred: Credential, role: EndfieldRole) -> SignInResult:
+        """Sign one Endfield role using an empty, signed POST body."""
+        if not role.role_id or not role.server_id:
+            raise SklandError("终末地角色或服务器信息不完整，请在森空岛同步角色后重试")
+        did = await self.get_device_id()
+        url = f"{self.zonai_base}/web/v1/game/endfield/attendance"
+        headers = self._signed_headers(url, "POST", "", cred, did)
+        headers.update(
+            {
+                "sk-game-role": f"3_{role.role_id}_{role.server_id}",
+                "origin": "https://game.skland.com",
+                "referer": "https://game.skland.com/",
+            }
+        )
+        # Signing "" but sending {} or null produces a different signature.
+        data = await self._request("POST", url, headers=headers, content="")
+        if not isinstance(data, dict):
+            raise SklandError("终末地签到响应格式异常")
+        if data.get("code") != 0:
+            return SignInResult(
+                success=False,
+                nickname=role.nickname,
+                error=str(data.get("message") or "终末地签到失败"),
+            )
+        payload = data.get("data") or {}
+        resources = payload.get("resourceInfoMap") or {}
+        awards: list[str] = []
+        for award in payload.get("awardIds") or []:
+            resource_id = (
+                str(award.get("id", "")) if isinstance(award, dict) else str(award)
+            )
+            resource = resources.get(resource_id) or {}
+            name = resource.get("name") or "未知奖励"
+            count = resource.get("count", 1)
+            awards.append(f"{name}x{count}")
+        return SignInResult(success=True, nickname=role.nickname, awards=awards)
 
     @staticmethod
     def parse_sanity(data: dict[str, Any], now: float | None = None) -> dict[str, int]:
