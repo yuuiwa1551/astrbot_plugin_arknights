@@ -25,6 +25,7 @@ import time
 import types
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 PLUGIN_NAME = "astrbot_plugin_arknights"
@@ -1718,6 +1719,69 @@ async def main() -> int:
     pinned._feed = hc
     await pinned._health_watch_job()
     check("feed_source=official 时看门狗静默", sent == [], f"{sent}")
+
+    with tempfile.TemporaryDirectory(prefix="ark-sign-routing-") as sign_dir:
+        routed = plugin_module.ArknightsPlugin.__new__(plugin_module.ArknightsPlugin)
+        routed.store = Store(Path(sign_dir) / "users.json")
+        routed.config = {}
+        origins = {
+            "a": "bot:GroupMessage:g1",
+            "b": "bot:GroupMessage:g2",
+            "c": "bot:FriendMessage:c",
+        }
+        for key, origin in origins.items():
+            await routed.store.upsert_auth(key, "fixture-token", key, [], umo=origin)
+
+        async def sign_fixture(key, user):
+            return [
+                (
+                    {"nick_name": f"owner-{key}", "game_name": "明日方舟"},
+                    SignInResult(success=key != "b", error="模拟失败"),
+                )
+            ]
+
+        routed._sign_in_user = AsyncMock(side_effect=sign_fixture)
+        routed._notify = AsyncMock()
+        with patch.object(plugin_module.asyncio, "sleep", new=AsyncMock()):
+            await routed._auto_sign_job()
+        delivered = dict(call.args for call in routed._notify.await_args_list)
+        check(
+            "自动签到仅发送到各账号绑定会话，群间与私聊互不串发",
+            len(delivered) == 3
+            and all(
+                f"owner-{key}" in delivered[origin]
+                and all(
+                    f"owner-{other}" not in delivered[origin]
+                    for other in origins
+                    if other != key
+                )
+                for key, origin in origins.items()
+            )
+            and "模拟失败" in delivered[origins["b"]],
+        )
+        await routed.store.set_sign_group("g1", "", False)
+        routed._notify.reset_mock()
+        routed._sign_in_user.reset_mock()
+        with patch.object(plugin_module.asyncio, "sleep", new=AsyncMock()):
+            await routed._auto_sign_job()
+        check(
+            "取消群订阅只停通知，账号仍自动签到",
+            routed._sign_in_user.await_count == 3
+            and origins["a"]
+            not in dict(call.args for call in routed._notify.await_args_list),
+        )
+        routed.skland = SimpleNamespace(
+            get_authorization=AsyncMock(
+                side_effect=plugin_module.SklandError("登录过期")
+            )
+        )
+        failed = await plugin_module.ArknightsPlugin._sign_in_user(
+            routed, "a", {"skland_nickname": "owner-a"}
+        )
+        check(
+            "自动签到登录失败有明确结果",
+            len(failed) == 1 and "登录过期" in failed[0][1].error,
+        )
 
     await plugin.terminate()
     check("terminate shuts the scheduler down", plugin.scheduler is None)

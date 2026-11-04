@@ -59,7 +59,7 @@ from .core.skland import (
 from .core.store import Store
 
 PLUGIN_NAME = "astrbot_plugin_arknights"
-PLUGIN_VERSION = "0.4.8"
+PLUGIN_VERSION = "0.4.9"
 
 # How often the health watchdog probes the self-hosted service, and how many
 # consecutive bad observations it takes to raise an alert. The service writes
@@ -563,9 +563,13 @@ class ArknightsPlugin(Star):
             umo=umo,
         )
         suffix = f"（仅保留前 {limit} 个）" if truncated else ""
+        hour, minute = self._parse_sign_time(self.config.get("sign_time", "00:05"))
+        notice = f"\n已开启每日 {hour:02d}:{minute:02d} 自动签到。"
+        if ":GroupMessage:" in umo:
+            notice += "已开启本群签到结果订阅。"
         if not bindings:
-            return f"绑定成功，找到 {len(endfield_roles)} 个终末地角色。发送 `ark终末地签到` 即可签到。"
-        return f"绑定成功，共 {len(bindings)} 个明日方舟角色{suffix}。"
+            return f"绑定成功，找到 {len(endfield_roles)} 个终末地角色。{notice}"
+        return f"绑定成功，共 {len(bindings)} 个明日方舟角色{suffix}。{notice}"
 
     # ── account commands ──────────────────────────────────────────────────
 
@@ -1124,7 +1128,7 @@ class ArknightsPlugin(Star):
             yield event.plain_result("请在群聊中使用该指令。")
             return
         await self.store.set_sign_group(group_id, event.unified_msg_origin, True)
-        yield event.plain_result("已开启本群的自动签到结果通知。")
+        yield event.plain_result("已开启本群绑定账号的自动签到结果通知。")
 
     @filter.command("ark取消订阅签到")
     async def unsubscribe_sign(self, event: AstrMessageEvent):
@@ -1146,8 +1150,7 @@ class ArknightsPlugin(Star):
             user: Stored user record.
 
         Returns:
-            One ``(binding, result)`` pair per role; empty when the stored
-            credential is no longer valid.
+            One ``(binding, result)`` pair per role, or a shared login failure.
         """
         try:
             authorization = await self.skland.get_authorization(
@@ -1156,7 +1159,15 @@ class ArknightsPlugin(Star):
             cred = await self.skland.get_credential(authorization)
         except SklandError as exc:
             logger.warning("[自动签到] %s 凭证失效，跳过: %s", user_key, exc)
-            return []
+            return [
+                (
+                    {
+                        "game_name": "鹰角账号",
+                        "nick_name": str(user.get("skland_nickname") or user_key),
+                    },
+                    SignInResult(success=False, error=f"登录失败：{exc}"),
+                )
+            ]
         results: list[tuple[dict[str, Any], SignInResult]] = []
         for binding in user.get("bindings") or []:
             try:
@@ -1185,38 +1196,30 @@ class ArknightsPlugin(Star):
     async def _auto_sign_job(self) -> None:
         """Sign in every bound account and deliver a summary.
 
-        Results go to the groups subscribed with ``ark订阅签到``; when no group is
-        subscribed they are sent privately to each account owner instead.
+        Results go only to each account's binding session. Group delivery
+        respects ``ark取消订阅签到``; private bindings notify their own session.
         """
         users = await self.store.all_users()
         if not users:
             return
-        groups = await self.store.list_sign_groups()
-        group_lines: list[str] = []
-        private: dict[str, list[str]] = {}
+        group_origins = {
+            str(group.get("umo") or "") for group in await self.store.list_sign_groups()
+        }
+        deliveries: dict[str, list[str]] = {}
 
         for user_key, user in users.items():
             results = await self._sign_in_user(user_key, user)
-            for binding, result in results:
-                line = self._sign_line(binding, result)
-                if groups:
-                    group_lines.append(line)
-                else:
-                    private.setdefault(user_key, []).append(line)
+            umo = str(user.get("umo") or "")
+            if umo and (":GroupMessage:" not in umo or umo in group_origins):
+                deliveries.setdefault(umo, []).extend(
+                    self._sign_line(binding, result) for binding, result in results
+                )
             # Spread requests out to avoid triggering rate limiting.
             await asyncio.sleep(3 + random.random() * 3)
 
-        if groups and group_lines:
-            text = "森空岛自动签到结果\n" + "\n".join(group_lines)
-            for group in groups:
-                await self._notify(str(group.get("umo") or ""), text)
-            return
-
-        for user_key, lines in private.items():
-            umo = str((users.get(user_key) or {}).get("umo") or "")
-            if not umo:
-                continue
-            await self._notify(umo, "森空岛自动签到结果\n" + "\n".join(lines))
+        for umo, lines in deliveries.items():
+            if lines:
+                await self._notify(umo, "森空岛自动签到结果\n" + "\n".join(lines))
 
     async def _sanity_poll_job(self) -> None:
         """Notify subscribers whose sanity has just reached the cap.

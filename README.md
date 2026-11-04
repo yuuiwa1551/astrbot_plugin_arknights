@@ -9,7 +9,7 @@
 > 这是 [yuuiwa1551 的个人维护分支](https://github.com/yuuiwa1551/astrbot_plugin_arknights)，在 [Coe / Siq5005 的原项目](https://github.com/Siq5005/astrbot_plugin_arknights)基础上加入终末地签到。安装与更新请使用本仓库；原项目作者与 MIT 许可保持保留。
 
 [![AstrBot](https://img.shields.io/badge/AstrBot-Plugin-FFB400?style=for-the-badge&logo=python)](https://github.com/AstrBotDevs/AstrBot)
-[![Version](https://img.shields.io/badge/version-0.4.8-FFB400?style=for-the-badge)](#-更新日志)
+[![Version](https://img.shields.io/badge/version-0.4.9-FFB400?style=for-the-badge)](#-更新日志)
 [![License](https://img.shields.io/badge/license-MIT-FFB400?style=for-the-badge)](LICENSE)
 
 ### 🚀 基于森空岛官方接口的明日方舟查询工具
@@ -191,6 +191,8 @@ astrbot_plugin_arknights/
 
 `ark签到` 默认同时签到两款游戏，分别报告成功、今天已签到或失败原因。某款游戏失败或没有绑定角色时，另一款游戏继续签到；关闭终末地自动签到不影响这条手动指令。`ark终末地签到` 继续保留为仅签到终末地的入口。
 
+绑定成功后即参与每日自动签到，默认时间为 `00:05`。在群内绑定会自动开启该群的签到结果订阅，结果只发到账号绑定所在群；私聊绑定的结果发到原私聊。`ark取消订阅签到` 只关闭本群通知，自动签到仍继续；重新在群内绑定会再次开启该群订阅。
+
 终末地签到直接使用已绑定的鹰角账号，已有用户无需重新扫码。每次签到都会从森空岛同步终末地角色，按角色与服务器分别签到；结果会标注游戏、角色与服务器。默认每日 `sign_time` 同时为两款游戏签到，通知继续使用现有私聊或群订阅。单个角色失败不会中断其他角色。
 
 只玩终末地的账号也可通过 `ark绑定` 登录，用 `ark绑定列表` 查看登录状态、`ark解绑` 删除整个登录。明日方舟的数据查询仍需绑定对应的方舟角色。`ark删除绑定` 删除最后一个方舟角色时沿用原行为，移除整个登录；如需继续签到终末地，请重新扫码绑定。
@@ -371,6 +373,12 @@ astrbot_plugin_arknights/
 
 <details>
 <summary>点击展开版本历史</summary>
+
+### 0.4.9 (2026-11-04)
+
+- 群内绑定成功后自动开启本群签到结果订阅，并提示每日自动签到时间。
+- 自动签到结果按账号绑定会话发送，不再广播到其他订阅群；取消群订阅后继续签到但不发通知。
+- 账号登录失败时在签到汇总中说明原因。
 
 ### 0.4.8 (2026-10-29)
 

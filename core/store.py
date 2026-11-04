@@ -148,8 +148,8 @@ class Store:
             token: Hypergryph passport token.
             skland_nickname: Display name reported by Skland.
             bindings: Binding entries, each containing at least a ``uid``.
-            umo: Unified message origin of the private session that bound the
-                account, used later for proactive notifications.
+            umo: Session that bound the account. Successful group bindings
+                also enable sign-in notifications in that group.
         """
         user_key = str(user_key)
         async with self._lock:
@@ -170,6 +170,12 @@ class Store:
                 "created_at": existing.get("created_at") or now,
                 "updated_at": now,
             }
+            origin = users[user_key]["umo"]
+            parts = origin.split(":", 2)
+            if len(parts) == 3 and parts[1] == "GroupMessage" and parts[2]:
+                groups = data["subs"]["sign_groups"]
+                if not any(item.get("umo") == origin for item in groups):
+                    groups.append({"group_id": parts[2], "umo": origin})
             self._write(data)
 
     async def set_primary(self, user_key: str, uid: str) -> bool:

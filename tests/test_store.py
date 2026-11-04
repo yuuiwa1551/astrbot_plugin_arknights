@@ -118,6 +118,28 @@ async def test_upsert_auth_keeps_umo(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_group_binding_subscribes_once_and_rebinding_reenables(tmp_path):
+    store = Store(tmp_path / "users.json")
+    origin = "bot:GroupMessage:g1"
+    await store.upsert_auth("u1", "tok", "n", [], umo=origin)
+    await store.upsert_auth("u2", "tok", "n", [], umo=origin)
+    assert await store.list_sign_groups() == [{"group_id": "g1", "umo": origin}]
+    await store.set_sign_group("g1", "", False)
+    # Reading/reopening does not silently undo an explicit cancellation.
+    reopened = Store(tmp_path / "users.json")
+    assert await reopened.list_sign_groups() == []
+    await reopened.upsert_auth("u1", "new-token", "n", [], umo=origin)
+    assert await reopened.list_sign_groups() == [{"group_id": "g1", "umo": origin}]
+
+
+@pytest.mark.anyio
+async def test_private_binding_does_not_enable_group_notifications(tmp_path):
+    store = Store(tmp_path / "users.json")
+    await store.upsert_auth("u1", "tok", "n", [], umo="bot:FriendMessage:u1")
+    assert await store.list_sign_groups() == []
+
+
+@pytest.mark.anyio
 async def test_all_users_returns_bound_accounts(tmp_path):
     store = Store(tmp_path / "users.json")
     await store.upsert_auth("u1", "tok", "n", [{"uid": "1", "nick_name": "A"}])
